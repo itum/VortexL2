@@ -2,7 +2,7 @@
 Description=VortexL2 Port Forward - Port %i
 After=network.target vortexl2-tunnel.service
 Requires=network.target
-Documentation=https://github.com/yourusername/VortexL2
+Documentation=https://github.com/iliya-Developer/VortexL2
 
 [Service]
 Type=simple

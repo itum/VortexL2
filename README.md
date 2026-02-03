@@ -25,7 +25,7 @@ A modular, production-quality CLI tool for managing L2TPv3 tunnels and TCP port 
 ## 📦 Quick Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yourusername/VortexL2/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/iliya-Developer/VortexL2/main/install.sh | sudo bash
 ```
 
 ## 🚀 First Run
