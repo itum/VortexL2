@@ -66,9 +66,6 @@ def cmd_apply():
         
         # Setup forwards if configured
         if config.forwarded_ports:
-            success, msg = forward.install_template()
-            print(f"Forward template: {msg}")
-            
             success, msg = forward.start_all_forwards()
             print(f"Port forwards: {msg}")
     
@@ -167,10 +164,10 @@ def handle_delete_tunnel(manager: ConfigManager):
         # Remove all port forwards (stop + disable + remove from config)
         if config.forwarded_ports:
             ui.show_info("Removing port forwards...")
-            ports_to_remove = list(config.forwarded_ports)  # Copy list since we're modifying it
-            for port in ports_to_remove:
-                forward.remove_forward(port)
-            ui.show_success(f"Removed {len(ports_to_remove)} port forward(s)")
+            entries = list(config.forwarded_ports)
+            for entry in entries:
+                forward.remove_forward(entry["port"], entry["protocol"])
+            ui.show_success(f"Removed {len(entries)} port forward(s)")
         
         # Stop tunnel
         ui.show_info("Stopping tunnel...")
@@ -255,10 +252,12 @@ def handle_logs(manager: ConfigManager):
     
     services = ["vortexl2-tunnel"]
     
-    # Add forward services for all tunnels
+    # Add forward services for all tunnels (port+protocol per service)
     for config in manager.get_all_tunnels():
-        for port in config.forwarded_ports:
-            services.append(f"vortexl2-forward@{port}")
+        for entry in config.forwarded_ports:
+            services.append(
+                f"vortexl2-fwd-{entry['port']}-{entry['protocol']}.service"
+            )
     
     for service in services:
         result = subprocess.run(

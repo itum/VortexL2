@@ -17,7 +17,7 @@ A modular, production-quality CLI tool for managing multiple L2TPv3 tunnels and 
 
 - 🔧 Interactive TUI management panel with Rich
 - 🌐 **Multiple L2TPv3 tunnels** on a single server
-- 🔀 TCP port forwarding via socat
+- 🔀 TCP and UDP port forwarding via socat
 - 🔄 Systemd integration for persistence
 - 📦 One-liner installation
 - 🛡️ Secure configuration with 0600 permissions
@@ -26,7 +26,7 @@ A modular, production-quality CLI tool for managing multiple L2TPv3 tunnels and 
 ## 📦 Quick Install
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/iliya-Developer/VortexL2/main/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/itum/VortexL2/main/install.sh)
 ```
 
 ## 🚀 First Run
@@ -66,7 +66,7 @@ Select "Start Current Tunnel" from the menu on both servers.
 
 ### 5. Add Port Forwards
 
-Select "Port Forwards" and add ports like: `443,80,2053`
+Select "Port Forwards" and add ports. Use `/udp` for UDP (default is TCP), e.g.: `443, 80, 53/udp`
 
 ## 🎯 Usage Examples
 
@@ -136,7 +136,7 @@ ip addr show l2tpeth0
 ss -ltnp | grep socat
 
 # Check service status
-systemctl status vortexl2-forward@443
+systemctl status vortexl2-fwd-443-tcp
 ```
 
 ### View Logs
@@ -146,7 +146,7 @@ systemctl status vortexl2-forward@443
 journalctl -u vortexl2-tunnel -f
 
 # Forward service logs
-journalctl -u vortexl2-forward@443 -f
+journalctl -u vortexl2-fwd-443-tcp -f
 ```
 
 ### Common Issues
@@ -159,7 +159,7 @@ journalctl -u vortexl2-forward@443 -f
 **❌ Port forward not working**
 1. Check socat is installed: `which socat`
 2. Verify tunnel is up: `ping 10.30.30.2` (from one side)
-3. Check service status: `systemctl status vortexl2-forward@PORT`
+3. Check service status: `systemctl status vortexl2-fwd-PORT-tcp` or `vortexl2-fwd-PORT-udp`
 
 **❌ Interface l2tpeth0 not found**
 1. Ensure session is created (not just tunnel)
@@ -183,9 +183,12 @@ session_id: 10
 peer_session_id: 20
 interface_index: 0
 forwarded_ports:
-  - 443
-  - 80
-  - 2053
+  - port: 443
+    protocol: tcp
+  - port: 80
+    protocol: tcp
+  - port: 53
+    protocol: udp
 ```
 
 ## 🏗️ Architecture
@@ -250,7 +253,7 @@ VortexL2/
 │   └── ui.py           # Rich TUI interface
 ├── systemd/
 │   ├── vortexl2-tunnel.service      # Tunnel boot service
-│   └── vortexl2-forward@.service    # Template for forwards
+│   └── vortexl2-fwd-{port}-{tcp|udp}.service   # Per-port forward services
 ├── install.sh          # Installation script
 └── README.md           # This file
 ```

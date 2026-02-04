@@ -349,8 +349,11 @@ def prompt_tunnel_config(config: TunnelConfig, side: str) -> bool:
 
 
 def prompt_ports() -> str:
-    """Prompt user for ports to forward."""
-    console.print("\n[dim]Enter ports as comma-separated list (e.g., 443,80,2053)[/]")
+    """Prompt user for ports to forward (TCP default; use /udp for UDP)."""
+    console.print(
+        "\n[dim]Enter ports as comma-separated list. "
+        "Use /udp for UDP (e.g. 443, 80, 53/udp). Default is TCP.[/]"
+    )
     return Prompt.ask("[bold cyan]Ports[/]")
 
 
@@ -406,13 +409,14 @@ def show_info(message: str):
 
 
 def show_forwards_list(forwards: list):
-    """Display port forwards in a table."""
+    """Display port forwards in a table (includes Protocol column)."""
     if not forwards:
         console.print("[yellow]No port forwards configured[/]")
         return
     
     table = Table(title="Port Forwards", box=box.ROUNDED)
     table.add_column("Port", style="cyan", justify="right")
+    table.add_column("Protocol", style="magenta")
     table.add_column("Remote Target", style="white")
     table.add_column("Status", style="white")
     table.add_column("Enabled", style="white")
@@ -420,9 +424,11 @@ def show_forwards_list(forwards: list):
     for fwd in forwards:
         status_style = "green" if fwd["status"] == "active" else "red"
         enabled_style = "green" if fwd["enabled"] == "enabled" else "yellow"
+        protocol = fwd.get("protocol", "TCP")
         
         table.add_row(
             str(fwd["port"]),
+            protocol,
             fwd["remote"],
             f"[{status_style}]{fwd['status']}[/]",
             f"[{enabled_style}]{fwd['enabled']}[/]"

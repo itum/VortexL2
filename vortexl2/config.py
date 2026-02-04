@@ -8,7 +8,14 @@ Each tunnel has its own YAML config file.
 import os
 import yaml
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
+
+
+def _normalize_forward_entry(entry: Union[int, Dict[str, Any]]) -> Dict[str, Any]:
+    """Convert legacy int or dict to {port, protocol} format."""
+    if isinstance(entry, int):
+        return {"port": entry, "protocol": "tcp"}
+    return {"port": entry["port"], "protocol": entry.get("protocol", "tcp")}
 
 
 CONFIG_DIR = Path("/etc/vortexl2")
@@ -185,11 +192,13 @@ class TunnelConfig:
         return f"l2tpeth{self.interface_index}"
     
     @property
-    def forwarded_ports(self) -> List[int]:
-        return self._config.get("forwarded_ports", [])
+    def forwarded_ports(self) -> List[Dict[str, Any]]:
+        """List of {port, protocol}; legacy list of ints normalized to tcp."""
+        raw = self._config.get("forwarded_ports", [])
+        return [_normalize_forward_entry(e) for e in raw]
     
     @forwarded_ports.setter
-    def forwarded_ports(self, value: List[int]) -> None:
+    def forwarded_ports(self, value: List[Dict[str, Any]]) -> None:
         self._config["forwarded_ports"] = value
         self._save()
     
@@ -202,19 +211,25 @@ class TunnelConfig:
             "peer_session_id": self.peer_session_id,
         }
     
-    def add_port(self, port: int) -> None:
-        """Add a port to forwarded ports list."""
-        ports = self.forwarded_ports
-        if port not in ports:
-            ports.append(port)
-            self.forwarded_ports = ports
+    def add_port(self, port: int, protocol: str = "tcp") -> None:
+        """Add (port, protocol) to forwarded ports if not already present."""
+        protocol = protocol.lower()
+        if protocol not in ("tcp", "udp"):
+            protocol = "tcp"
+        entries = self.forwarded_ports
+        if any(e["port"] == port and e["protocol"] == protocol for e in entries):
+            return
+        entries.append({"port": port, "protocol": protocol})
+        self.forwarded_ports = entries
     
-    def remove_port(self, port: int) -> None:
-        """Remove a port from forwarded ports list."""
-        ports = self.forwarded_ports
-        if port in ports:
-            ports.remove(port)
-            self.forwarded_ports = ports
+    def remove_port(self, port: int, protocol: str) -> None:
+        """Remove the entry with given port and protocol."""
+        protocol = protocol.lower()
+        if protocol not in ("tcp", "udp"):
+            protocol = "tcp"
+        entries = self.forwarded_ports
+        entries = [e for e in entries if e["port"] != port or e["protocol"] != protocol]
+        self.forwarded_ports = entries
     
     def is_configured(self) -> bool:
         """Check if basic configuration is complete."""
