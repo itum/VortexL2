@@ -9,7 +9,9 @@ import re
 from typing import Optional, Dict, Tuple, List
 from dataclasses import dataclass
 
+
 INTERFACE_NAME = "l2tpeth0"
+
 
 @dataclass
 class CommandResult:
@@ -104,8 +106,6 @@ class TunnelManager:
     def check_tunnel_exists(self, tunnel_id: int = None) -> bool:
         """Check if L2TP tunnel exists."""
         if tunnel_id is None:
-            if not self.config.role:
-                return False
             tunnel_id = self.config.tunnel_id
         
         result = run_command("ip l2tp show tunnel")
@@ -118,10 +118,9 @@ class TunnelManager:
     
     def check_session_exists(self, tunnel_id: int = None, session_id: int = None) -> bool:
         """Check if L2TP session exists."""
-        if tunnel_id is None or session_id is None:
-            if not self.config.role:
-                return False
+        if tunnel_id is None:
             tunnel_id = self.config.tunnel_id
+        if session_id is None:
             session_id = self.config.session_id
         
         result = run_command("ip l2tp show session")
@@ -133,16 +132,11 @@ class TunnelManager:
         return bool(re.search(pattern, result.stdout))
     
     def create_tunnel(self) -> Tuple[bool, str]:
-        """Create L2TP tunnel based on configured role."""
-        if not self.config.role:
-            return False, "Role not configured. Please configure endpoints first."
-        
-        if not self.config.ip_iran or not self.config.ip_kharej:
+        """Create L2TP tunnel based on configuration."""
+        if not self.config.local_ip or not self.config.remote_ip:
             return False, "IPs not configured. Please configure endpoints first."
         
         ids = self.config.get_tunnel_ids()
-        local_ip = self.config.get_local_ip()
-        remote_ip = self.config.get_remote_ip()
         
         if self.check_tunnel_exists():
             return False, f"Tunnel {ids['tunnel_id']} already exists. Delete it first or use recreate."
@@ -152,8 +146,8 @@ class TunnelManager:
             f"tunnel_id {ids['tunnel_id']} "
             f"peer_tunnel_id {ids['peer_tunnel_id']} "
             f"encap ip "
-            f"local {local_ip} "
-            f"remote {remote_ip}"
+            f"local {self.config.local_ip} "
+            f"remote {self.config.remote_ip}"
         )
         
         result = run_command(cmd)
@@ -164,9 +158,6 @@ class TunnelManager:
     
     def create_session(self) -> Tuple[bool, str]:
         """Create L2TP session in existing tunnel."""
-        if not self.config.role:
-            return False, "Role not configured"
-        
         ids = self.config.get_tunnel_ids()
         
         if not self.check_tunnel_exists():
@@ -200,15 +191,9 @@ class TunnelManager:
         
         return True, f"Interface {INTERFACE_NAME} is up"
     
-    def assign_ip(self, ip_cidr: str = None) -> Tuple[bool, str]:
+    def assign_ip(self) -> Tuple[bool, str]:
         """Assign IP address to l2tpeth0 interface."""
-        if ip_cidr is None:
-            if self.config.role == "IRAN":
-                ip_cidr = self.config.iran_iface_ip
-            elif self.config.role == "KHAREJ":
-                ip_cidr = self.config.kharej_iface_ip
-            else:
-                return False, "Role not configured"
+        ip_cidr = self.config.interface_ip
         
         # Check if IP already assigned
         result = run_command(f"ip addr show {INTERFACE_NAME}")
@@ -226,9 +211,6 @@ class TunnelManager:
     
     def delete_session(self) -> Tuple[bool, str]:
         """Delete L2TP session."""
-        if not self.config.role:
-            return False, "Role not configured"
-        
         ids = self.config.get_tunnel_ids()
         
         if not self.check_session_exists():
@@ -243,9 +225,6 @@ class TunnelManager:
     
     def delete_tunnel(self) -> Tuple[bool, str]:
         """Delete L2TP tunnel (must delete session first)."""
-        if not self.config.role:
-            return False, "Role not configured"
-        
         ids = self.config.get_tunnel_ids()
         
         # First delete session if exists
@@ -286,7 +265,7 @@ class TunnelManager:
         if not success:
             return False, "\n".join(steps)
         
-        # Assign IP (for both IRAN and KHAREJ)
+        # Assign IP
         success, msg = self.assign_ip()
         steps.append(f"Assign IP: {msg}")
         if not success:
@@ -313,8 +292,10 @@ class TunnelManager:
     def get_status(self) -> Dict[str, any]:
         """Get comprehensive tunnel status."""
         status = {
-            "role": self.config.role,
+            "tunnel_name": self.config.tunnel_name,
             "configured": self.config.is_configured(),
+            "local_ip": self.config.local_ip,
+            "remote_ip": self.config.remote_ip,
             "tunnel_exists": False,
             "session_exists": False,
             "interface_up": False,
@@ -323,9 +304,6 @@ class TunnelManager:
             "session_info": "",
             "interface_info": "",
         }
-        
-        if not self.config.role:
-            return status
         
         # Check tunnel
         result = run_command("ip l2tp show tunnel")

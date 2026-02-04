@@ -54,14 +54,13 @@ def cmd_apply(config: Config):
     if not success:
         return 1
     
-    # On Iran side, also setup forwards template and start forwards
-    if config.role == "IRAN":
+    # Also setup forwards template and start forwards if configured
+    if config.forwarded_ports:
         success, msg = forward.install_template()
         print(f"Forward template: {msg}")
         
-        if config.forwarded_ports:
-            success, msg = forward.start_all_forwards()
-            print(f"Port forwards: {msg}")
+        success, msg = forward.start_all_forwards()
+        print(f"Port forwards: {msg}")
     
     return 0
 
@@ -85,20 +84,6 @@ def handle_prerequisites(config: Config, tunnel: TunnelManager):
 def handle_configure(config: Config):
     """Handle endpoint configuration."""
     ui.show_banner(config)
-    
-    # First configure role if not set
-    if not config.role:
-        role = ui.prompt_role()
-        if not role:
-            return
-        config.role = role
-    else:
-        if ui.confirm(f"Current role is {config.role}. Change it?", default=False):
-            role = ui.prompt_role()
-            if role:
-                config.role = role
-    
-    # Configure IPs
     ui.prompt_endpoints(config)
     ui.wait_for_enter()
 
@@ -108,7 +93,7 @@ def handle_create_tunnel(config: Config, tunnel: TunnelManager):
     ui.show_banner(config)
     
     if not config.is_configured():
-        ui.show_error("Please configure endpoints first (option 2)")
+        ui.show_error("Please configure tunnel first (option 2)")
         ui.wait_for_enter()
         return
     
@@ -141,8 +126,8 @@ def handle_delete_tunnel(config: Config, tunnel: TunnelManager, forward: Forward
     if not ui.confirm("Are you sure you want to delete the tunnel and clear all config?", default=False):
         return
     
-    # Stop forwards first if Iran
-    if config.role == "IRAN":
+    # Stop forwards first
+    if config.forwarded_ports:
         ui.show_info("Stopping port forwards...")
         success, msg = forward.stop_all_forwards()
         ui.show_output(msg, "Stop Forwards")
@@ -164,12 +149,6 @@ def handle_delete_tunnel(config: Config, tunnel: TunnelManager, forward: Forward
 
 def handle_forwards_menu(config: Config, forward: ForwardManager):
     """Handle port forwards submenu."""
-    if config.role != "IRAN":
-        ui.show_banner(config)
-        ui.show_error("Port forwarding is only available on IRAN side")
-        ui.wait_for_enter()
-        return
-    
     while True:
         ui.show_banner(config)
         
@@ -224,8 +203,8 @@ def handle_status(config: Config, tunnel: TunnelManager, forward: ForwardManager
     status = tunnel.get_status()
     ui.show_status(status)
     
-    # Forward status (Iran only)
-    if config.role == "IRAN":
+    # Forward status
+    if config.forwarded_ports:
         ui.console.print()
         forwards = forward.list_forwards()
         ui.show_forwards_list(forwards)
@@ -240,9 +219,8 @@ def handle_logs(config: Config):
     services = ["vortexl2-tunnel"]
     
     # Add forward services
-    if config.role == "IRAN":
-        for port in config.forwarded_ports:
-            services.append(f"vortexl2-forward@{port}")
+    for port in config.forwarded_ports:
+        services.append(f"vortexl2-forward@{port}")
     
     for service in services:
         result = subprocess.run(

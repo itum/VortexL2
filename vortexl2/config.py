@@ -6,8 +6,6 @@ with secure file permissions.
 """
 
 import os
-import uuid
-import socket
 import yaml
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -23,34 +21,17 @@ class Config:
     # Default values
     DEFAULTS = {
         "version": "1.0.0",
-        "role": None,  # "IRAN" or "KHAREJ"
-        "ip_iran": None,
-        "ip_kharej": None,
-        "iran_iface_ip": "10.30.30.1",
-        "kharej_iface_ip": "10.30.30.2",
+        "tunnel_name": "tunnel1",
+        "local_ip": None,
+        "remote_ip": None,
+        "interface_ip": "10.30.30.1/24",
         "remote_forward_ip": "10.30.30.2",
         "forwarded_ports": [],
-        # Tunnel IDs (role-based defaults applied at runtime)
-        "tunnel_id": None,
-        "peer_tunnel_id": None,
-        "session_id": None,
-        "peer_session_id": None,
-    }
-    
-    # Role-based default tunnel IDs
-    ROLE_TUNNEL_DEFAULTS = {
-        "IRAN": {
-            "tunnel_id": 1000,
-            "peer_tunnel_id": 2000,
-            "session_id": 10,
-            "peer_session_id": 20,
-        },
-        "KHAREJ": {
-            "tunnel_id": 2000,
-            "peer_tunnel_id": 1000,
-            "session_id": 20,
-            "peer_session_id": 10,
-        },
+        # Tunnel IDs with defaults
+        "tunnel_id": 1000,
+        "peer_tunnel_id": 2000,
+        "session_id": 10,
+        "peer_session_id": 20,
     }
     
     def __init__(self):
@@ -89,50 +70,39 @@ class Config:
         self._save()
     
     @property
-    def role(self) -> Optional[str]:
-        return self._config.get("role")
+    def tunnel_name(self) -> str:
+        return self._config.get("tunnel_name", "tunnel1")
     
-    @role.setter
-    def role(self, value: str) -> None:
-        if value not in ("IRAN", "KHAREJ", None):
-            raise ValueError("Role must be 'IRAN' or 'KHAREJ'")
-        self._config["role"]  = value
+    @tunnel_name.setter
+    def tunnel_name(self, value: str) -> None:
+        self._config["tunnel_name"] = value
         self._save()
     
     @property
-    def ip_iran(self) -> Optional[str]:
-        return self._config.get("ip_iran")
+    def local_ip(self) -> Optional[str]:
+        return self._config.get("local_ip")
     
-    @ip_iran.setter
-    def ip_iran(self, value: str) -> None:
-        self._config["ip_iran"] = value
+    @local_ip.setter
+    def local_ip(self, value: str) -> None:
+        self._config["local_ip"] = value
         self._save()
     
     @property
-    def ip_kharej(self) -> Optional[str]:
-        return self._config.get("ip_kharej")
+    def remote_ip(self) -> Optional[str]:
+        return self._config.get("remote_ip")
     
-    @ip_kharej.setter
-    def ip_kharej(self, value: str) -> None:
-        self._config["ip_kharej"] = value
+    @remote_ip.setter
+    def remote_ip(self, value: str) -> None:
+        self._config["remote_ip"] = value
         self._save()
     
     @property
-    def iran_iface_ip(self) -> str:
-        return self._config.get("iran_iface_ip", "10.30.30.1")
+    def interface_ip(self) -> str:
+        return self._config.get("interface_ip", "10.30.30.1/24")
     
-    @iran_iface_ip.setter
-    def iran_iface_ip(self, value: str) -> None:
-        self._config["iran_iface_ip"] = value
-        self._save()
-    
-    @property
-    def kharej_iface_ip(self) -> str:
-        return self._config.get("kharej_iface_ip", "10.30.30.2")
-    
-    @kharej_iface_ip.setter
-    def kharej_iface_ip(self, value: str) -> None:
-        self._config["kharej_iface_ip"] = value
+    @interface_ip.setter
+    def interface_ip(self, value: str) -> None:
+        self._config["interface_ip"] = value
         self._save()
     
     @property
@@ -155,14 +125,7 @@ class Config:
     
     @property
     def tunnel_id(self) -> int:
-        """Get tunnel_id, falling back to role default if not set."""
-        val = self._config.get("tunnel_id")
-        if val is not None:
-            return val
-        role = self.role
-        if role and role in self.ROLE_TUNNEL_DEFAULTS:
-            return self.ROLE_TUNNEL_DEFAULTS[role]["tunnel_id"]
-        return 1000  # Ultimate fallback
+        return self._config.get("tunnel_id", 1000)
     
     @tunnel_id.setter
     def tunnel_id(self, value: int) -> None:
@@ -171,14 +134,7 @@ class Config:
     
     @property
     def peer_tunnel_id(self) -> int:
-        """Get peer_tunnel_id, falling back to role default if not set."""
-        val = self._config.get("peer_tunnel_id")
-        if val is not None:
-            return val
-        role = self.role
-        if role and role in self.ROLE_TUNNEL_DEFAULTS:
-            return self.ROLE_TUNNEL_DEFAULTS[role]["peer_tunnel_id"]
-        return 2000  # Ultimate fallback
+        return self._config.get("peer_tunnel_id", 2000)
     
     @peer_tunnel_id.setter
     def peer_tunnel_id(self, value: int) -> None:
@@ -187,14 +143,7 @@ class Config:
     
     @property
     def session_id(self) -> int:
-        """Get session_id, falling back to role default if not set."""
-        val = self._config.get("session_id")
-        if val is not None:
-            return val
-        role = self.role
-        if role and role in self.ROLE_TUNNEL_DEFAULTS:
-            return self.ROLE_TUNNEL_DEFAULTS[role]["session_id"]
-        return 10  # Ultimate fallback
+        return self._config.get("session_id", 10)
     
     @session_id.setter
     def session_id(self, value: int) -> None:
@@ -203,14 +152,7 @@ class Config:
     
     @property
     def peer_session_id(self) -> int:
-        """Get peer_session_id, falling back to role default if not set."""
-        val = self._config.get("peer_session_id")
-        if val is not None:
-            return val
-        role = self.role
-        if role and role in self.ROLE_TUNNEL_DEFAULTS:
-            return self.ROLE_TUNNEL_DEFAULTS[role]["peer_session_id"]
-        return 20  # Ultimate fallback
+        return self._config.get("peer_session_id", 20)
     
     @peer_session_id.setter
     def peer_session_id(self, value: int) -> None:
@@ -242,35 +184,17 @@ class Config:
     
     def clear_all(self) -> None:
         """Clear all configuration values (used when deleting tunnel)."""
-        self._config["role"] = None
-        self._config["ip_iran"] = None
-        self._config["ip_kharej"] = None
+        self._config["local_ip"] = None
+        self._config["remote_ip"] = None
         self._config["forwarded_ports"] = []
         self._save()
     
     def is_configured(self) -> bool:
         """Check if basic configuration is complete."""
         return bool(
-            self.role and 
-            self.ip_iran and 
-            self.ip_kharej
+            self.local_ip and 
+            self.remote_ip
         )
-    
-    def get_local_ip(self) -> Optional[str]:
-        """Get local IP based on role."""
-        if self.role == "IRAN":
-            return self.ip_iran
-        elif self.role == "KHAREJ":
-            return self.ip_kharej
-        return None
-    
-    def get_remote_ip(self) -> Optional[str]:
-        """Get remote IP based on role."""
-        if self.role == "IRAN":
-            return self.ip_kharej
-        elif self.role == "KHAREJ":
-            return self.ip_iran
-        return None
     
     def to_dict(self) -> Dict[str, Any]:
         """Return configuration as dictionary."""

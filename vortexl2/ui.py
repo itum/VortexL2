@@ -45,13 +45,7 @@ def show_banner(config: Config):
     """Display the ASCII banner with system info."""
     clear_screen()
     
-    role = config.role or "NOT SET"
-    role_color = "green" if config.role == "IRAN" else "cyan" if config.role == "KHAREJ" else "yellow"
-    
     banner_text = Text(ASCII_BANNER, style="bold cyan")
-    
-    # Get server IP
-    server_ip = config.get_local_ip() or "Not configured"
     
     # Print banner
     console.print(banner_text)
@@ -64,15 +58,15 @@ def show_banner(config: Config):
     ))
     
     # Server info
-    info_lines = [
-        f"[bold white]Server IP:[/] [yellow]{server_ip}[/]",
-        f"[bold white]Role:[/] [{role_color}]{role}[/]",
-    ]
+    tunnel_name = config.tunnel_name or "Not set"
+    local_ip = config.local_ip or "Not configured"
+    remote_ip = config.remote_ip or "Not configured"
     
-    if config.ip_iran:
-        info_lines.append(f"[bold white]Iran IP:[/] [green]{config.ip_iran}[/]")
-    if config.ip_kharej:
-        info_lines.append(f"[bold white]Kharej IP:[/] [cyan]{config.ip_kharej}[/]")
+    info_lines = [
+        f"[bold white]Tunnel Name:[/] [magenta]{tunnel_name}[/]",
+        f"[bold white]Local IP:[/] [green]{local_ip}[/]",
+        f"[bold white]Remote IP:[/] [cyan]{remote_ip}[/]",
+    ]
     
     console.print(Panel(
         "\n".join(info_lines),
@@ -87,10 +81,10 @@ def show_main_menu() -> str:
     """Display main menu and get user choice."""
     menu_items = [
         ("1", "Install/Verify Prerequisites"),
-        ("2", "Configure Endpoints"),
+        ("2", "Configure Tunnel"),
         ("3", "Create/Start Tunnel"),
         ("4", "Stop/Delete Tunnel"),
-        ("5", "Port Forwards (Iran only)"),
+        ("5", "Port Forwards"),
         ("6", "Status/Diagnostics"),
         ("7", "View Logs"),
         ("0", "Exit"),
@@ -132,123 +126,85 @@ def show_forwards_menu() -> str:
     return Prompt.ask("\n[bold cyan]Select option[/]", default="0")
 
 
-def prompt_role() -> Optional[str]:
-    """Prompt user to select role."""
-    console.print("\n[bold white]Select Server Role:[/]")
-    console.print("  [bold cyan][1][/] IRAN (receives port forwards)")
-    console.print("  [bold cyan][2][/] KHAREJ (remote tunnel endpoint)")
-    console.print("  [bold cyan][0][/] Cancel")
-    
-    choice = Prompt.ask("\n[bold cyan]Select role[/]", default="0")
-    
-    if choice == "1":
-        return "IRAN"
-    elif choice == "2":
-        return "KHAREJ"
-    return None
-
-
 def prompt_endpoints(config: Config) -> bool:
-    """Prompt user for endpoint IPs."""
-    console.print("\n[bold white]Configure Endpoint IPs[/]")
-    console.print("[dim]Enter the public IPs for both tunnel sides.[/]\n")
+    """Prompt user for tunnel configuration."""
+    console.print("\n[bold white]Configure Tunnel[/]")
+    console.print("[dim]Enter tunnel configuration values. Press Enter to use defaults.[/]\n")
     
-    # Iran IP
-    default_iran = config.ip_iran or ""
-    ip_iran = Prompt.ask(
-        "[bold green]Iran Server Public IP[/]",
-        default=default_iran if default_iran else None
+    # Tunnel Name
+    tunnel_name = Prompt.ask(
+        "[bold magenta]Tunnel Name[/]",
+        default=config.tunnel_name
     )
-    if not ip_iran:
-        console.print("[red]Iran IP is required[/]")
-        return False
+    config.tunnel_name = tunnel_name
     
-    # Kharej IP
-    default_kharej = config.ip_kharej or ""
-    ip_kharej = Prompt.ask(
-        "[bold cyan]Kharej Server Public IP[/]",
-        default=default_kharej if default_kharej else None
+    # Local IP
+    default_local = config.local_ip or ""
+    local_ip = Prompt.ask(
+        "[bold green]Local Server Public IP[/]",
+        default=default_local if default_local else None
     )
-    if not ip_kharej:
-        console.print("[red]Kharej IP is required[/]")
+    if not local_ip:
+        console.print("[red]Local IP is required[/]")
         return False
+    config.local_ip = local_ip
     
-    config.ip_iran = ip_iran
-    config.ip_kharej = ip_kharej
+    # Remote IP
+    default_remote = config.remote_ip or ""
+    remote_ip = Prompt.ask(
+        "[bold cyan]Remote Server Public IP[/]",
+        default=default_remote if default_remote else None
+    )
+    if not remote_ip:
+        console.print("[red]Remote IP is required[/]")
+        return False
+    config.remote_ip = remote_ip
     
-    # Interface IP configuration based on role
-    if config.role == "IRAN":
-        console.print("\n[dim]Configure tunnel interface IP (for l2tpeth0)[/]")
-        default_iface = config.iran_iface_ip
-        iran_iface = Prompt.ask(
-            "[bold green]Iran l2tpeth0 IP (CIDR)[/]",
-            default=default_iface
-        )
-        config.iran_iface_ip = iran_iface
-        
-        # Remote forward IP
-        default_remote = config.remote_forward_ip
-        remote_ip = Prompt.ask(
-            "[bold green]Remote Forward Target IP[/]",
-            default=default_remote
-        )
-        config.remote_forward_ip = remote_ip
+    # Interface IP
+    console.print("\n[dim]Configure tunnel interface IP (for l2tpeth0)[/]")
+    interface_ip = Prompt.ask(
+        "[bold yellow]Interface IP (CIDR)[/]",
+        default=config.interface_ip
+    )
+    config.interface_ip = interface_ip
     
-    elif config.role == "KHAREJ":
-        console.print("\n[dim]Configure tunnel interface IP (for l2tpeth0)[/]")
-        default_iface = config.kharej_iface_ip
-        kharej_iface = Prompt.ask(
-            "[bold cyan]Kharej l2tpeth0 IP (CIDR)[/]",
-            default=default_iface
-        )
-        config.kharej_iface_ip = kharej_iface
+    # Remote forward target IP
+    remote_forward = Prompt.ask(
+        "[bold yellow]Remote Forward Target IP[/]",
+        default=config.remote_forward_ip
+    )
+    config.remote_forward_ip = remote_forward
     
-    # Tunnel IDs configuration (optional - uses role defaults)
+    # Tunnel IDs
     console.print("\n[dim]Configure L2TPv3 tunnel IDs (press Enter to use defaults)[/]")
     
-    # Get role defaults for display
-    from .config import Config as ConfigClass
-    role_defaults = ConfigClass.ROLE_TUNNEL_DEFAULTS.get(config.role, {})
-    
     # Tunnel ID
-    current_tunnel = config._config.get("tunnel_id")
-    default_tunnel = current_tunnel if current_tunnel else role_defaults.get("tunnel_id", 1000)
     tunnel_id_input = Prompt.ask(
-        f"[bold yellow]Tunnel ID[/]",
-        default=str(default_tunnel)
+        "[bold yellow]Tunnel ID[/]",
+        default=str(config.tunnel_id)
     )
-    if tunnel_id_input:
-        config.tunnel_id = int(tunnel_id_input)
+    config.tunnel_id = int(tunnel_id_input)
     
     # Peer Tunnel ID
-    current_peer_tunnel = config._config.get("peer_tunnel_id")
-    default_peer_tunnel = current_peer_tunnel if current_peer_tunnel else role_defaults.get("peer_tunnel_id", 2000)
     peer_tunnel_id_input = Prompt.ask(
-        f"[bold yellow]Peer Tunnel ID[/]",
-        default=str(default_peer_tunnel)
+        "[bold yellow]Peer Tunnel ID[/]",
+        default=str(config.peer_tunnel_id)
     )
-    if peer_tunnel_id_input:
-        config.peer_tunnel_id = int(peer_tunnel_id_input)
+    config.peer_tunnel_id = int(peer_tunnel_id_input)
     
     # Session ID
-    current_session = config._config.get("session_id")
-    default_session = current_session if current_session else role_defaults.get("session_id", 10)
     session_id_input = Prompt.ask(
-        f"[bold yellow]Session ID[/]",
-        default=str(default_session)
+        "[bold yellow]Session ID[/]",
+        default=str(config.session_id)
     )
-    if session_id_input:
-        config.session_id = int(session_id_input)
+    config.session_id = int(session_id_input)
     
     # Peer Session ID
-    current_peer_session = config._config.get("peer_session_id")
-    default_peer_session = current_peer_session if current_peer_session else role_defaults.get("peer_session_id", 20)
     peer_session_id_input = Prompt.ask(
-        f"[bold yellow]Peer Session ID[/]",
-        default=str(default_peer_session)
+        "[bold yellow]Peer Session ID[/]",
+        default=str(config.peer_session_id)
     )
-    if peer_session_id_input:
-        config.peer_session_id = int(peer_session_id_input)
+    config.peer_session_id = int(peer_session_id_input)
     
     console.print("\n[green]✓ Configuration saved![/]")
     return True
@@ -286,8 +242,10 @@ def show_status(status_data: dict):
     table.add_column("Property", style="cyan")
     table.add_column("Value", style="white")
     
-    table.add_row("Role", status_data.get("role", "Not set") or "Not set")
+    table.add_row("Tunnel Name", status_data.get("tunnel_name", "Not set") or "Not set")
     table.add_row("Configured", "Yes" if status_data.get("configured") else "No")
+    table.add_row("Local IP", status_data.get("local_ip") or "Not set")
+    table.add_row("Remote IP", status_data.get("remote_ip") or "Not set")
     table.add_row("Tunnel Exists", "[green]Yes[/]" if status_data.get("tunnel_exists") else "[red]No[/]")
     table.add_row("Session Exists", "[green]Yes[/]" if status_data.get("session_exists") else "[red]No[/]")
     table.add_row("Interface Up", "[green]Yes[/]" if status_data.get("interface_up") else "[red]No[/]")
