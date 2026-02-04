@@ -75,13 +75,13 @@ def cmd_apply():
     return 1 if errors > 0 else 0
 
 
-def handle_prerequisites(current_tunnel: TunnelConfig):
+def handle_prerequisites():
     """Handle prerequisites installation."""
-    ui.show_banner(current_tunnel)
+    ui.show_banner()
     ui.show_info("Installing prerequisites...")
     
-    # Use any tunnel config for prerequisites (they're system-wide)
-    tunnel = TunnelManager(current_tunnel) if current_tunnel else TunnelManager(TunnelConfig("temp"))
+    # Use temp config for prerequisites (they're system-wide)
+    tunnel = TunnelManager(TunnelConfig("temp"))
     
     success, msg = tunnel.install_prerequisites()
     ui.show_output(msg, "Prerequisites Installation")
@@ -94,159 +94,108 @@ def handle_prerequisites(current_tunnel: TunnelConfig):
     ui.wait_for_enter()
 
 
-def handle_tunnel_management(manager: ConfigManager, current_tunnel: TunnelConfig) -> TunnelConfig:
-    """Handle tunnel management submenu. Returns updated current tunnel."""
-    while True:
-        ui.show_banner(current_tunnel)
-        ui.show_tunnel_list(manager, current_tunnel.name if current_tunnel else None)
-        ui.console.print()
-        
-        choice = ui.show_tunnel_menu()
-        
-        if choice == "0":
-            break
-        elif choice == "1":
-            # List tunnels (already shown above)
-            ui.wait_for_enter()
-        elif choice == "2":
-            # Add new tunnel
-            name = ui.prompt_tunnel_name()
-            if name:
-                if manager.tunnel_exists(name):
-                    ui.show_error(f"Tunnel '{name}' already exists")
-                else:
-                    new_tunnel = manager.create_tunnel(name)
-                    ui.show_success(f"Tunnel '{name}' created with interface {new_tunnel.interface_name}")
-                    current_tunnel = new_tunnel
-            ui.wait_for_enter()
-        elif choice == "3":
-            # Select tunnel
-            selected = ui.prompt_select_tunnel(manager)
-            if selected:
-                current_tunnel = manager.get_tunnel(selected)
-                ui.show_success(f"Switched to tunnel '{selected}'")
-            ui.wait_for_enter()
-        elif choice == "4":
-            # Delete tunnel
-            ui.show_tunnel_list(manager, current_tunnel.name if current_tunnel else None)
-            selected = ui.prompt_select_tunnel(manager)
-            if selected:
-                if ui.confirm(f"Are you sure you want to delete tunnel '{selected}'?", default=False):
-                    # Stop tunnel first if running
-                    tunnel_config = manager.get_tunnel(selected)
-                    if tunnel_config:
-                        tunnel_mgr = TunnelManager(tunnel_config)
-                        tunnel_mgr.full_teardown()
-                    
-                    manager.delete_tunnel(selected)
-                    ui.show_success(f"Tunnel '{selected}' deleted")
-                    
-                    # If deleted current tunnel, switch to another
-                    if current_tunnel and current_tunnel.name == selected:
-                        tunnels = manager.list_tunnels()
-                        if tunnels:
-                            current_tunnel = manager.get_tunnel(tunnels[0])
-                        else:
-                            current_tunnel = None
-            ui.wait_for_enter()
+def handle_create_tunnel(manager: ConfigManager):
+    """Handle tunnel creation (config + start)."""
+    ui.show_banner()
     
-    return current_tunnel
-
-
-def handle_configure(current_tunnel: TunnelConfig):
-    """Handle tunnel configuration."""
-    if not current_tunnel:
-        ui.show_error("No tunnel selected. Create or select a tunnel first.")
+    # Get tunnel name
+    name = ui.prompt_tunnel_name()
+    if not name:
+        return
+    
+    if manager.tunnel_exists(name):
+        ui.show_error(f"Tunnel '{name}' already exists")
         ui.wait_for_enter()
         return
     
-    ui.show_banner(current_tunnel)
-    ui.prompt_tunnel_config(current_tunnel)
-    ui.wait_for_enter()
-
-
-def handle_start_tunnel(current_tunnel: TunnelConfig):
-    """Handle tunnel start."""
-    if not current_tunnel:
-        ui.show_error("No tunnel selected.")
+    # Create tunnel config
+    config = manager.create_tunnel(name)
+    ui.show_success(f"Tunnel '{name}' created with interface {config.interface_name}")
+    
+    # Configure tunnel
+    if not ui.prompt_tunnel_config(config):
+        # User cancelled or error
+        manager.delete_tunnel(name)
+        ui.show_error("Configuration cancelled. Tunnel removed.")
         ui.wait_for_enter()
         return
     
-    ui.show_banner(current_tunnel)
-    
-    if not current_tunnel.is_configured():
-        ui.show_error("Please configure tunnel first (option 3)")
-        ui.wait_for_enter()
-        return
-    
-    tunnel = TunnelManager(current_tunnel)
-    
-    # Check if tunnel exists
-    if tunnel.check_tunnel_exists():
-        ui.show_warning("Tunnel already exists")
-        if not ui.confirm("Delete existing tunnel and recreate?", default=False):
-            ui.wait_for_enter()
-            return
-        
-        success, msg = tunnel.full_teardown()
-        ui.show_output(msg, "Teardown")
-    
-    ui.show_info("Creating tunnel...")
+    # Start tunnel
+    ui.show_info("Starting tunnel...")
+    tunnel = TunnelManager(config)
     success, msg = tunnel.full_setup()
     ui.show_output(msg, "Tunnel Setup")
     
     if success:
-        ui.show_success("Tunnel started successfully")
+        ui.show_success(f"Tunnel '{name}' created and started successfully!")
     else:
         ui.show_error("Tunnel creation failed")
     
     ui.wait_for_enter()
 
 
-def handle_stop_tunnel(current_tunnel: TunnelConfig):
-    """Handle tunnel stop."""
-    if not current_tunnel:
-        ui.show_error("No tunnel selected.")
+def handle_delete_tunnel(manager: ConfigManager):
+    """Handle tunnel deletion (stop + remove config)."""
+    ui.show_banner()
+    ui.show_tunnel_list(manager)
+    
+    tunnels = manager.list_tunnels()
+    if not tunnels:
+        ui.show_warning("No tunnels to delete")
         ui.wait_for_enter()
         return
     
-    ui.show_banner(current_tunnel)
-    
-    if not ui.confirm(f"Are you sure you want to stop tunnel '{current_tunnel.name}'?", default=False):
+    selected = ui.prompt_select_tunnel(manager)
+    if not selected:
         return
     
-    tunnel = TunnelManager(current_tunnel)
-    forward = ForwardManager(current_tunnel)
+    if not ui.confirm(f"Are you sure you want to delete tunnel '{selected}'?", default=False):
+        return
     
-    # Stop forwards first
-    if current_tunnel.forwarded_ports:
-        ui.show_info("Stopping port forwards...")
-        success, msg = forward.stop_all_forwards()
-        ui.show_output(msg, "Stop Forwards")
+    # Stop tunnel first
+    config = manager.get_tunnel(selected)
+    if config:
+        tunnel = TunnelManager(config)
+        forward = ForwardManager(config)
+        
+        # Stop forwards
+        if config.forwarded_ports:
+            ui.show_info("Stopping port forwards...")
+            forward.stop_all_forwards()
+        
+        # Stop tunnel
+        ui.show_info("Stopping tunnel...")
+        success, msg = tunnel.full_teardown()
+        ui.show_output(msg, "Tunnel Teardown")
     
-    ui.show_info("Stopping tunnel...")
-    success, msg = tunnel.full_teardown()
-    ui.show_output(msg, "Tunnel Teardown")
-    
-    if success:
-        ui.show_success("Tunnel stopped successfully")
-    else:
-        ui.show_error("Tunnel stop failed")
+    # Delete config
+    manager.delete_tunnel(selected)
+    ui.show_success(f"Tunnel '{selected}' deleted")
     
     ui.wait_for_enter()
 
 
-def handle_forwards_menu(current_tunnel: TunnelConfig):
+def handle_list_tunnels(manager: ConfigManager):
+    """Handle listing all tunnels."""
+    ui.show_banner()
+    ui.show_tunnel_list(manager)
+    ui.wait_for_enter()
+
+
+def handle_forwards_menu(manager: ConfigManager):
     """Handle port forwards submenu."""
-    if not current_tunnel:
-        ui.show_error("No tunnel selected.")
-        ui.wait_for_enter()
+    ui.show_banner()
+    
+    # Select tunnel for forwards
+    config = ui.prompt_select_tunnel_for_forwards(manager)
+    if not config:
         return
     
-    forward = ForwardManager(current_tunnel)
+    forward = ForwardManager(config)
     
     while True:
-        ui.show_banner(current_tunnel)
+        ui.show_banner()
+        ui.console.print(f"[bold]Managing forwards for tunnel: [magenta]{config.name}[/][/]\n")
         
         # Show current forwards
         forwards = forward.list_forwards()
@@ -291,40 +240,15 @@ def handle_forwards_menu(current_tunnel: TunnelConfig):
             ui.wait_for_enter()
 
 
-def handle_status(current_tunnel: TunnelConfig):
-    """Handle status display."""
-    if not current_tunnel:
-        ui.show_error("No tunnel selected.")
-        ui.wait_for_enter()
-        return
-    
-    ui.show_banner(current_tunnel)
-    
-    tunnel = TunnelManager(current_tunnel)
-    forward = ForwardManager(current_tunnel)
-    
-    # Tunnel status
-    status = tunnel.get_status()
-    ui.show_status(status)
-    
-    # Forward status
-    if current_tunnel.forwarded_ports:
-        ui.console.print()
-        forwards = forward.list_forwards()
-        ui.show_forwards_list(forwards)
-    
-    ui.wait_for_enter()
-
-
-def handle_logs(current_tunnel: TunnelConfig):
+def handle_logs(manager: ConfigManager):
     """Handle log viewing."""
-    ui.show_banner(current_tunnel)
+    ui.show_banner()
     
     services = ["vortexl2-tunnel"]
     
-    # Add forward services for current tunnel
-    if current_tunnel and current_tunnel.forwarded_ports:
-        for port in current_tunnel.forwarded_ports:
+    # Add forward services for all tunnels
+    for config in manager.get_all_tunnels():
+        for port in config.forwarded_ports:
             services.append(f"vortexl2-forward@{port}")
     
     for service in services:
@@ -350,19 +274,11 @@ def main_menu():
     # Clear screen before starting
     ui.clear_screen()
     
-    # Initialize config manager and get/create first tunnel
+    # Initialize config manager
     manager = ConfigManager()
-    tunnels = manager.list_tunnels()
-    
-    if tunnels:
-        current_tunnel = manager.get_tunnel(tunnels[0])
-    else:
-        # Create default tunnel
-        current_tunnel = manager.create_tunnel("tunnel1")
-        ui.show_info("Created default tunnel 'tunnel1'")
     
     while True:
-        ui.show_banner(current_tunnel)
+        ui.show_banner()
         choice = ui.show_main_menu()
         
         try:
@@ -370,26 +286,17 @@ def main_menu():
                 ui.console.print("\n[bold green]Goodbye![/]\n")
                 break
             elif choice == "1":
-                handle_prerequisites(current_tunnel)
+                handle_prerequisites()
             elif choice == "2":
-                current_tunnel = handle_tunnel_management(manager, current_tunnel)
-                # Refresh tunnel list after management
-                if not current_tunnel:
-                    tunnels = manager.list_tunnels()
-                    if tunnels:
-                        current_tunnel = manager.get_tunnel(tunnels[0])
+                handle_create_tunnel(manager)
             elif choice == "3":
-                handle_configure(current_tunnel)
+                handle_delete_tunnel(manager)
             elif choice == "4":
-                handle_start_tunnel(current_tunnel)
+                handle_list_tunnels(manager)
             elif choice == "5":
-                handle_stop_tunnel(current_tunnel)
+                handle_forwards_menu(manager)
             elif choice == "6":
-                handle_forwards_menu(current_tunnel)
-            elif choice == "7":
-                handle_status(current_tunnel)
-            elif choice == "8":
-                handle_logs(current_tunnel)
+                handle_logs(manager)
             else:
                 ui.show_warning("Invalid option")
                 ui.wait_for_enter()

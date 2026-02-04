@@ -41,8 +41,8 @@ def clear_screen():
     os.system('clear' if os.name != 'nt' else 'cls')
 
 
-def show_banner(current_tunnel: TunnelConfig = None):
-    """Display the ASCII banner with system info."""
+def show_banner():
+    """Display the ASCII banner with developer info."""
     clear_screen()
     
     banner_text = Text(ASCII_BANNER, style="bold cyan")
@@ -50,32 +50,9 @@ def show_banner(current_tunnel: TunnelConfig = None):
     # Print banner
     console.print(banner_text)
     
-    # Contact info bar
+    # Developer info bar
     console.print(Panel(
         f"[bold white]Telegram:[/] [cyan]@iliyadevsh[/]  |  [bold white]Version:[/] [red]{__version__}[/]  |  [bold white]GitHub:[/] [cyan]github.com/iliya-Developer[/]",
-        border_style="white",
-        box=box.ROUNDED
-    ))
-    
-    # Tunnel info
-    if current_tunnel:
-        tunnel_name = current_tunnel.name
-        local_ip = current_tunnel.local_ip or "Not configured"
-        remote_ip = current_tunnel.remote_ip or "Not configured"
-        interface = current_tunnel.interface_name
-        
-        info_lines = [
-            f"[bold white]Active Tunnel:[/] [magenta]{tunnel_name}[/]",
-            f"[bold white]Local IP:[/] [green]{local_ip}[/]  →  [bold white]Remote IP:[/] [cyan]{remote_ip}[/]",
-            f"[bold white]Interface:[/] [yellow]{interface}[/]",
-        ]
-    else:
-        info_lines = [
-            "[yellow]No tunnel selected. Use 'Manage Tunnels' to create or select one.[/]"
-        ]
-    
-    console.print(Panel(
-        "\n".join(info_lines),
         title="[bold white]VortexL2 - L2TPv3 Tunnel Manager[/]",
         border_style="cyan",
         box=box.ROUNDED
@@ -87,13 +64,11 @@ def show_main_menu() -> str:
     """Display main menu and get user choice."""
     menu_items = [
         ("1", "Install/Verify Prerequisites"),
-        ("2", "Manage Tunnels"),
-        ("3", "Configure Current Tunnel"),
-        ("4", "Start Current Tunnel"),
-        ("5", "Stop Current Tunnel"),
-        ("6", "Port Forwards"),
-        ("7", "Status/Diagnostics"),
-        ("8", "View Logs"),
+        ("2", "Create Tunnel"),
+        ("3", "Delete Tunnel"),
+        ("4", "List Tunnels"),
+        ("5", "Port Forwards"),
+        ("6", "View Logs"),
         ("0", "Exit"),
     ]
     
@@ -105,28 +80,6 @@ def show_main_menu() -> str:
         table.add_row(f"[{opt}]", desc)
     
     console.print(Panel(table, title="[bold white]Main Menu[/]", border_style="blue"))
-    
-    return Prompt.ask("\n[bold cyan]Select option[/]", default="0")
-
-
-def show_tunnel_menu() -> str:
-    """Display tunnel management menu."""
-    menu_items = [
-        ("1", "List All Tunnels"),
-        ("2", "Add New Tunnel"),
-        ("3", "Select Tunnel"),
-        ("4", "Delete Tunnel"),
-        ("0", "Back to Main Menu"),
-    ]
-    
-    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 2))
-    table.add_column("Option", style="bold cyan", width=4)
-    table.add_column("Description", style="white")
-    
-    for opt, desc in menu_items:
-        table.add_row(f"[{opt}]", desc)
-    
-    console.print(Panel(table, title="[bold white]Tunnel Management[/]", border_style="magenta"))
     
     return Prompt.ask("\n[bold cyan]Select option[/]", default="0")
 
@@ -155,12 +108,14 @@ def show_forwards_menu() -> str:
     return Prompt.ask("\n[bold cyan]Select option[/]", default="0")
 
 
-def show_tunnel_list(manager: ConfigManager, current_name: str = None):
-    """Display list of all configured tunnels."""
+def show_tunnel_list(manager: ConfigManager):
+    """Display list of all configured tunnels with status."""
+    from .tunnel import TunnelManager
+    
     tunnels = manager.get_all_tunnels()
     
     if not tunnels:
-        console.print("[yellow]No tunnels configured. Create one first.[/]")
+        console.print("[yellow]No tunnels configured.[/]")
         return
     
     table = Table(title="Configured Tunnels", box=box.ROUNDED)
@@ -172,19 +127,19 @@ def show_tunnel_list(manager: ConfigManager, current_name: str = None):
     table.add_column("Tunnel ID", style="white")
     table.add_column("Status", style="white")
     
-    for i, tunnel in enumerate(tunnels, 1):
-        is_current = tunnel.name == current_name
-        name_display = f"[bold]{tunnel.name}[/] ★" if is_current else tunnel.name
-        configured = "[green]Ready[/]" if tunnel.is_configured() else "[red]Incomplete[/]"
+    for i, config in enumerate(tunnels, 1):
+        tunnel_mgr = TunnelManager(config)
+        is_running = tunnel_mgr.check_tunnel_exists()
+        status = "[green]Running[/]" if is_running else "[red]Stopped[/]"
         
         table.add_row(
             str(i),
-            name_display,
-            tunnel.local_ip or "-",
-            tunnel.remote_ip or "-",
-            tunnel.interface_name,
-            str(tunnel.tunnel_id),
-            configured
+            config.name,
+            config.local_ip or "-",
+            config.remote_ip or "-",
+            config.interface_name,
+            str(config.tunnel_id),
+            status
         )
     
     console.print(table)
@@ -313,6 +268,37 @@ def prompt_ports() -> str:
     return Prompt.ask("[bold cyan]Ports[/]")
 
 
+def prompt_select_tunnel_for_forwards(manager: ConfigManager) -> Optional[TunnelConfig]:
+    """Prompt to select a tunnel for port forwarding."""
+    tunnels = manager.get_all_tunnels()
+    
+    if not tunnels:
+        console.print("[yellow]No tunnels available. Create one first.[/]")
+        return None
+    
+    if len(tunnels) == 1:
+        return tunnels[0]
+    
+    console.print("\n[bold white]Select tunnel for port forwards:[/]")
+    for i, tunnel in enumerate(tunnels, 1):
+        console.print(f"  [bold cyan][{i}][/] {tunnel.name}")
+    console.print(f"  [bold cyan][0][/] Cancel")
+    
+    choice = Prompt.ask("\n[bold cyan]Select tunnel[/]", default="1")
+    
+    try:
+        idx = int(choice)
+        if idx == 0:
+            return None
+        if 1 <= idx <= len(tunnels):
+            return tunnels[idx - 1]
+    except ValueError:
+        pass
+    
+    console.print("[red]Invalid selection[/]")
+    return None
+
+
 def show_success(message: str):
     """Display success message."""
     console.print(f"\n[bold green]✓[/] {message}")
@@ -331,31 +317,6 @@ def show_warning(message: str):
 def show_info(message: str):
     """Display info message."""
     console.print(f"\n[bold cyan]ℹ[/] {message}")
-
-
-def show_status(status_data: dict):
-    """Display tunnel status in a formatted table."""
-    table = Table(title="Tunnel Status", box=box.ROUNDED)
-    table.add_column("Property", style="cyan")
-    table.add_column("Value", style="white")
-    
-    table.add_row("Tunnel Name", status_data.get("tunnel_name", "Not set") or "Not set")
-    table.add_row("Configured", "Yes" if status_data.get("configured") else "No")
-    table.add_row("Local IP", status_data.get("local_ip") or "Not set")
-    table.add_row("Remote IP", status_data.get("remote_ip") or "Not set")
-    table.add_row("Interface", status_data.get("interface_name") or "l2tpeth0")
-    table.add_row("Tunnel Exists", "[green]Yes[/]" if status_data.get("tunnel_exists") else "[red]No[/]")
-    table.add_row("Session Exists", "[green]Yes[/]" if status_data.get("session_exists") else "[red]No[/]")
-    table.add_row("Interface Up", "[green]Yes[/]" if status_data.get("interface_up") else "[red]No[/]")
-    table.add_row("Interface IP", status_data.get("interface_ip") or "None")
-    
-    console.print(table)
-    
-    if status_data.get("tunnel_info"):
-        console.print(Panel(status_data["tunnel_info"], title="Tunnel Info", border_style="dim"))
-    
-    if status_data.get("session_info"):
-        console.print(Panel(status_data["session_info"], title="Session Info", border_style="dim"))
 
 
 def show_forwards_list(forwards: list):
