@@ -85,11 +85,19 @@ def _parse_port_protocol(token: str) -> Optional[Tuple[int, str]]:
     return None
 
 
+def _secure_fwd_service_name(tunnel_name: str) -> str:
+    """Systemd template instance: vortexl2-secure-fwd@tunnelname.service"""
+    return f"vortexl2-secure-fwd@{tunnel_name}.service"
+
+
 class ForwardManager:
-    """Manages socat port forwarding services (TCP and UDP)."""
+    """Manages port forwarding: socat (plain) or single secure proxy (TLS)."""
     
     def __init__(self, config):
         self.config = config
+    
+    def _use_secure(self) -> bool:
+        return bool(getattr(self.config, "secure_forward", False))
     
     def _get_service_name(self, port: int, protocol: str) -> str:
         """Get systemd service name for a port and protocol."""
@@ -106,7 +114,7 @@ class ForwardManager:
         return SERVICE_TEMPLATE_UDP if protocol.lower() == "udp" else SERVICE_TEMPLATE_TCP
     
     def create_forward(self, port: int, protocol: str = "tcp") -> Tuple[bool, str]:
-        """Create and start a port forward service (TCP or UDP)."""
+        """Create and start a port forward (socat or secure proxy)."""
         protocol = protocol.lower() if protocol else "tcp"
         if protocol not in ("tcp", "udp"):
             protocol = "tcp"
@@ -116,7 +124,13 @@ class ForwardManager:
         if not (1 <= port <= 65535):
             return False, f"Port {port} out of range (1-65535)"
         
-        # Migrate legacy service (vortexl2-fwd-{port}.service) to new name
+        if self._use_secure():
+            self.config.add_port(port, protocol)
+            svc = _secure_fwd_service_name(self.config.name)
+            run_command("systemctl daemon-reload")
+            run_command(f"systemctl enable --now {svc}")
+            return True, f"Port forward {port}/{protocol.upper()} added (secure -> {remote_ip}:{port})"
+        
         legacy_name = f"vortexl2-fwd-{port}.service"
         legacy_path = SYSTEMD_DIR / legacy_name
         if legacy_path.exists():
@@ -129,18 +143,15 @@ class ForwardManager:
         service_name = self._get_service_name(port, protocol)
         template = self._get_template(protocol)
         service_content = template.format(port=port, remote_ip=remote_ip)
-        
         try:
             with open(service_path, 'w') as f:
                 f.write(service_content)
         except Exception as e:
             return False, f"Failed to create service file: {e}"
-        
         run_command("systemctl daemon-reload")
         success, output = run_command(f"systemctl enable --now {service_name}")
         if not success:
             return False, f"Failed to start forward for {port}/{protocol}: {output}"
-        
         self.config.add_port(port, protocol)
         return True, f"Port forward {port}/{protocol.upper()} created (-> {remote_ip}:{port})"
     
@@ -149,15 +160,21 @@ class ForwardManager:
         protocol = protocol.lower() if protocol else "tcp"
         if protocol not in ("tcp", "udp"):
             protocol = "tcp"
+        self.config.remove_port(port, protocol)
+        if self._use_secure():
+            svc = _secure_fwd_service_name(self.config.name)
+            if not self.config.forwarded_ports:
+                run_command(f"systemctl stop {svc}")
+                run_command(f"systemctl disable {svc}")
+            run_command("systemctl daemon-reload")
+            return True, f"Port forward {port}/{protocol.upper()} removed"
         service_name = self._get_service_name(port, protocol)
         service_path = self._get_service_path(port, protocol)
-        
         run_command(f"systemctl stop {service_name}")
         run_command(f"systemctl disable {service_name}")
         if service_path.exists():
             service_path.unlink()
         run_command("systemctl daemon-reload")
-        self.config.remove_port(port, protocol)
         return True, f"Port forward {port}/{protocol.upper()} removed"
     
     def add_multiple_forwards(self, ports_str: str) -> Tuple[bool, str]:
@@ -189,8 +206,23 @@ class ForwardManager:
         return True, "\n".join(results)
     
     def list_forwards(self) -> List[Dict]:
-        """List all configured port forwards with status (from config list of dicts)."""
+        """List all configured port forwards with status."""
         forwards = []
+        if self._use_secure():
+            svc = _secure_fwd_service_name(self.config.name)
+            success, output = run_command(f"systemctl is-active {svc}")
+            status = output if success else "inactive"
+            success, output = run_command(f"systemctl is-enabled {svc}")
+            enabled = output if success else "disabled"
+            for entry in self.config.forwarded_ports:
+                forwards.append({
+                    "port": entry["port"],
+                    "protocol": entry["protocol"].upper(),
+                    "status": status,
+                    "enabled": enabled,
+                    "remote": f"{self.config.remote_forward_ip}:{entry['port']}",
+                })
+            return forwards
         for entry in self.config.forwarded_ports:
             port = entry["port"]
             protocol = entry["protocol"]
@@ -210,6 +242,22 @@ class ForwardManager:
     
     def start_all_forwards(self) -> Tuple[bool, str]:
         """Start all configured port forwards."""
+        if self._use_secure():
+            if not self.config.forwarded_ports:
+                return True, "No port forwards configured"
+            for entry in self.config.forwarded_ports:
+                sn = self._get_service_name(entry["port"], entry["protocol"])
+                run_command(f"systemctl stop {sn}")
+                run_command(f"systemctl disable {sn}")
+            svc = _secure_fwd_service_name(self.config.name)
+            run_command("systemctl daemon-reload")
+            success, output = run_command(f"systemctl start {svc}")
+            if success:
+                return True, f"Secure forward started ({svc})"
+            return False, output
+        svc = _secure_fwd_service_name(self.config.name)
+        run_command(f"systemctl stop {svc}")
+        run_command(f"systemctl disable {svc}")
         results = []
         for entry in self.config.forwarded_ports:
             port = entry["port"]
@@ -231,6 +279,12 @@ class ForwardManager:
     
     def stop_all_forwards(self) -> Tuple[bool, str]:
         """Stop all configured port forwards."""
+        if self._use_secure():
+            if not self.config.forwarded_ports:
+                return True, "No port forwards configured"
+            svc = _secure_fwd_service_name(self.config.name)
+            success, output = run_command(f"systemctl stop {svc}")
+            return success, f"Secure forward stopped" if success else output
         results = []
         for entry in self.config.forwarded_ports:
             port = entry["port"]
@@ -247,6 +301,13 @@ class ForwardManager:
     
     def restart_all_forwards(self) -> Tuple[bool, str]:
         """Restart all configured port forwards."""
+        if self._use_secure():
+            if not self.config.forwarded_ports:
+                return True, "No port forwards configured"
+            svc = _secure_fwd_service_name(self.config.name)
+            run_command("systemctl daemon-reload")
+            success, output = run_command(f"systemctl restart {svc}")
+            return success, f"Secure forward restarted" if success else output
         results = []
         for entry in self.config.forwarded_ports:
             port = entry["port"]

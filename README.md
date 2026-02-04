@@ -17,10 +17,10 @@ A modular, production-quality CLI tool for managing multiple L2TPv3 tunnels and 
 
 - 🔧 Interactive TUI management panel with Rich
 - 🌐 **Multiple L2TPv3 tunnels** on a single server
-- 🔀 TCP and UDP port forwarding via socat
+- 🔀 TCP and UDP port forwarding (socat or optional **TLS-encrypted** channel)
 - 🔄 Systemd integration for persistence
 - 📦 One-liner installation
-- 🛡️ Secure configuration with 0600 permissions
+- 🛡️ Secure configuration with 0600 permissions; optional PSK-based TLS for forwards
 - 🎯 Fully configurable tunnel IDs
 
 ## 📦 Quick Install
@@ -240,37 +240,74 @@ forwarded_ports:
                     └─────────────────┘
 ```
 
+## 🔐 Secure Port Forwarding (Optional)
+
+You can encrypt traffic between the two servers for port forwards using a **TLS 1.3** channel with a shared secret (PSK). When disabled, behaviour is unchanged and socat forwards traffic in plaintext over the L2TP tunnel.
+
+### How to enable
+
+1. **Main menu** → **7. Secure Forward Settings** (or **Port Forwards** → **7. Secure Forward (TLS) Settings**).
+2. Select the tunnel and choose **Enable secure forward**.
+3. Set **Role**: **server** (this host listens for TLS on port 443) or **client** (this host connects to the peer).
+4. Set **TLS listen port** / **TLS remote port** (default 443 on both sides).
+5. Set **PSK file path** (e.g. `/etc/vortexl2/secure_psk`). Use **Generate new random PSK** to create a secret; **copy the same file to the other server** (or put the same secret in `secure_psk` in the tunnel YAML).
+6. On the other server, repeat with the **opposite role** (one server, one client) and the **same PSK file or content**.
+
+### Behaviour
+
+- **One TLS connection** carries all forwarded ports (TCP and UDP). Single handshake, lower overhead.
+- **Port 443** is the default so traffic looks like normal HTTPS to DPI.
+- **Backward compatible**: with secure forward off, existing TCP/UDP forwards work as before (socat).
+
+### Requirements
+
+- **Python**: `cryptography` (installed by `install.sh` if available).
+- **Both sides**: same PSK (file or config), correct roles (server/client), and firewall allowing the chosen TLS port (e.g. 443).
+
+### Config fields (YAML)
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `secure_forward` | `false` | Enable TLS-encrypted port forwarding |
+| `secure_listen_port` | `443` | Port to listen on (server role) |
+| `secure_remote_port` | `443` | Port to connect to (client role) |
+| `secure_role` | `server` | `server` or `client` |
+| `secure_psk_file` | `/etc/vortexl2/secure_psk` | Path to shared secret file |
+| `secure_psk` | (none) | Inline PSK (optional; overrides file if set) |
+
 ## 📁 Project Structure
 
 ```
 VortexL2/
 ├── vortexl2/
-│   ├── __init__.py     # Package info
-│   ├── main.py         # CLI entry point
-│   ├── config.py       # Multi-tunnel configuration
-│   ├── tunnel.py       # L2TPv3 tunnel operations
-│   ├── forward.py      # Port forward management
-│   └── ui.py           # Rich TUI interface
+│   ├── __init__.py       # Package info
+│   ├── main.py           # CLI entry point
+│   ├── config.py         # Multi-tunnel configuration
+│   ├── tunnel.py         # L2TPv3 tunnel operations
+│   ├── forward.py        # Port forward management (socat + secure)
+│   ├── secure_channel.py # TLS 1.3 secure forward proxy
+│   └── ui.py             # Rich TUI interface
 ├── systemd/
-│   ├── vortexl2-tunnel.service      # Tunnel boot service
-│   └── vortexl2-fwd-{port}-{tcp|udp}.service   # Per-port forward services
-├── install.sh          # Installation script
-└── README.md           # This file
+│   ├── vortexl2-tunnel.service        # Tunnel boot service
+│   ├── vortexl2-secure-fwd@.service  # Secure forward (one per tunnel)
+│   └── vortexl2-fwd-{port}-{tcp|udp}.service  # Per-port socat (when secure off)
+├── install.sh            # Installation script
+└── README.md             # This file
 ```
 
 ## ⚠️ Security Notice
 
-**L2TPv3 provides NO encryption!**
+**L2TPv3 provides NO encryption by itself.**
 
-The tunnel transports raw Ethernet frames over IP without any encryption. This is suitable for:
+The L2TP tunnel transports frames over IP without encryption. This is suitable for:
 - ✅ Bypassing network restrictions
 - ✅ Creating L2 connectivity
-- ❌ NOT secure for sensitive data in transit
+- ❌ NOT secure for sensitive data in transit (unless you use **Secure Port Forwarding** above)
 
-For encrypted traffic, consider:
-- Adding IPsec on top of L2TPv3
-- Using WireGuard as an alternative
-- Encrypting application-level traffic (TLS/HTTPS)
+Options for encrypted traffic:
+- **Secure Port Forwarding** (this project): TLS 1.3 on port 443 between the two servers for forwarded ports.
+- IPsec on top of L2TPv3, or WireGuard as an alternative.
+- Application-level encryption (e.g. TLS/HTTPS).
 
 ## 🔄 Uninstall
 

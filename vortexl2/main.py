@@ -64,7 +64,7 @@ def cmd_apply():
             errors += 1
             continue
         
-        # Setup forwards if configured
+        # Setup forwards if configured (socat or secure proxy)
         if config.forwarded_ports:
             success, msg = forward.start_all_forwards()
             print(f"Port forwards: {msg}")
@@ -244,6 +244,23 @@ def handle_forwards_menu(manager: ConfigManager):
             success, msg = forward.start_all_forwards()
             ui.show_output(msg, "Start Forwards")
             ui.wait_for_enter()
+        elif choice == "7":
+            # Secure forward settings
+            ui.prompt_secure_forward_settings(config)
+            ui.show_success("Settings saved. Restart forwards if needed.")
+            ui.wait_for_enter()
+
+
+def handle_secure_forward_settings(manager: ConfigManager):
+    """Configure secure forward (TLS) for a tunnel."""
+    ui.show_banner()
+    ui.show_tunnel_list(manager)
+    config = ui.prompt_select_tunnel_for_forwards(manager)
+    if not config:
+        return
+    ui.prompt_secure_forward_settings(config)
+    ui.show_success("Secure forward settings saved.")
+    ui.wait_for_enter()
 
 
 def handle_logs(manager: ConfigManager):
@@ -251,9 +268,9 @@ def handle_logs(manager: ConfigManager):
     ui.show_banner()
     
     services = ["vortexl2-tunnel"]
-    
-    # Add forward services for all tunnels (port+protocol per service)
     for config in manager.get_all_tunnels():
+        if getattr(config, "secure_forward", False):
+            services.append(f"vortexl2-secure-fwd@{config.name}.service")
         for entry in config.forwarded_ports:
             services.append(
                 f"vortexl2-fwd-{entry['port']}-{entry['protocol']}.service"
@@ -305,6 +322,8 @@ def main_menu():
                 handle_forwards_menu(manager)
             elif choice == "6":
                 handle_logs(manager)
+            elif choice == "7":
+                handle_secure_forward_settings(manager)
             else:
                 ui.show_warning("Invalid option")
                 ui.wait_for_enter()
@@ -337,8 +356,13 @@ Examples:
     parser.add_argument(
         'command',
         nargs='?',
-        choices=['apply'],
+        choices=['apply', 'secure-fwd'],
         help='Command to run'
+    )
+    parser.add_argument(
+        'tunnel_name',
+        nargs='?',
+        help='Tunnel name (for secure-fwd)'
     )
     parser.add_argument(
         '--version', '-v',
@@ -351,6 +375,13 @@ Examples:
     if args.command == 'apply':
         check_root()
         sys.exit(cmd_apply())
+    elif args.command == 'secure-fwd':
+        check_root()
+        if not args.tunnel_name:
+            ui.show_error("secure-fwd requires tunnel name: vortexl2 secure-fwd <tunnel_name>")
+            sys.exit(1)
+        from vortexl2.secure_channel import main_secure_fwd
+        sys.exit(main_secure_fwd(args.tunnel_name))
     else:
         main_menu()
 

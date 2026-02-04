@@ -1,0 +1,16 @@
+[Unit]
+Description=VortexL2 Secure Port Forward - %i
+After=network-online.target
+Wants=network-online.target
+Documentation=https://github.com/iliya-Developer/VortexL2
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/vortexl2 secure-fwd %i
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -104,6 +104,7 @@ def show_main_menu() -> str:
         ("4", "List Tunnels"),
         ("5", "Port Forwards"),
         ("6", "View Logs"),
+        ("7", "Secure Forward Settings"),
         ("0", "Exit"),
     ]
     
@@ -128,6 +129,7 @@ def show_forwards_menu() -> str:
         ("4", "Restart All Forwards"),
         ("5", "Stop All Forwards"),
         ("6", "Start All Forwards"),
+        ("7", "Secure Forward (TLS) Settings"),
         ("0", "Back to Main Menu"),
     ]
     
@@ -345,6 +347,52 @@ def prompt_tunnel_config(config: TunnelConfig, side: str) -> bool:
     config.peer_session_id = int(peer_session_id_input)
     
     console.print("\n[green]✓ Configuration saved![/]")
+    return True
+
+
+def prompt_secure_forward_settings(config: TunnelConfig) -> bool:
+    """Prompt for secure forward (TLS) settings. Returns True if user completed."""
+    console.print("\n[bold white]Secure Forward (TLS) Settings[/]")
+    console.print("[dim]Encrypt port forward traffic between servers. Default port 443 (HTTPS-like).[/]\n")
+    enable = Confirm.ask("Enable secure forward for this tunnel?", default=bool(getattr(config, "secure_forward", False)))
+    config.secure_forward = enable
+    if not enable:
+        console.print("[dim]Secure forward disabled. Port forwards will use plain socat.[/]")
+        return True
+    role_default = (getattr(config, "secure_role", None) or "server").lower()
+    if role_default not in ("server", "client"):
+        role_default = "server"
+    role = Prompt.ask(
+        "Role (this server): [bold cyan]server[/] listens for TLS, [bold cyan]client[/] connects",
+        default=role_default,
+        choices=["server", "client"]
+    )
+    config.secure_role = role
+    listen_port = Prompt.ask("TLS listen port (server side)", default=str(getattr(config, "secure_listen_port", 443)))
+    try:
+        config.secure_listen_port = int(listen_port)
+    except ValueError:
+        config.secure_listen_port = 443
+    remote_port = Prompt.ask("TLS remote port (client connects to)", default=str(getattr(config, "secure_remote_port", 443)))
+    try:
+        config.secure_remote_port = int(remote_port)
+    except ValueError:
+        config.secure_remote_port = 443
+    psk_file = Prompt.ask("PSK file path (shared secret file)", default=getattr(config, "secure_psk_file", "/etc/vortexl2/secure_psk"))
+    config.secure_psk_file = psk_file
+    if Confirm.ask("Generate new random PSK and write to file? (use same file on both servers)", default=False):
+        import secrets
+        psk_path = os.path.expanduser(psk_file)
+        try:
+            os.makedirs(os.path.dirname(psk_path) or ".", exist_ok=True)
+            with open(psk_path, "w") as f:
+                f.write(secrets.token_hex(32))
+            os.chmod(psk_path, 0o600)
+            console.print(f"[green]PSK written to {psk_path}. Copy this file to the other server.[/]")
+        except Exception as e:
+            console.print(f"[red]Failed to write PSK file: {e}[/]")
+    else:
+        console.print("[dim]Ensure the same PSK file (or content) exists on both servers.[/]")
     return True
 
 

@@ -38,6 +38,13 @@ class TunnelConfig:
         "peer_session_id": 20,
         "interface_index": 0,
         "forwarded_ports": [],
+        # Secure forward (optional)
+        "secure_forward": False,
+        "secure_listen_port": 443,
+        "secure_remote_port": 443,
+        "secure_psk": None,
+        "secure_psk_file": "/etc/vortexl2/secure_psk",
+        "secure_role": "server",  # "server" | "client"
     }
     
     def __init__(self, name: str, config_data: Dict[str, Any] = None, auto_save: bool = True):
@@ -200,6 +207,60 @@ class TunnelConfig:
     @forwarded_ports.setter
     def forwarded_ports(self, value: List[Dict[str, Any]]) -> None:
         self._config["forwarded_ports"] = value
+        self._save()
+    
+    @property
+    def secure_forward(self) -> bool:
+        return bool(self._config.get("secure_forward", False))
+    
+    @secure_forward.setter
+    def secure_forward(self, value: bool) -> None:
+        self._config["secure_forward"] = bool(value)
+        self._save()
+    
+    @property
+    def secure_listen_port(self) -> int:
+        return int(self._config.get("secure_listen_port", 443))
+    
+    @secure_listen_port.setter
+    def secure_listen_port(self, value: int) -> None:
+        self._config["secure_listen_port"] = int(value)
+        self._save()
+    
+    @property
+    def secure_remote_port(self) -> int:
+        return int(self._config.get("secure_remote_port", 443))
+    
+    @secure_remote_port.setter
+    def secure_remote_port(self, value: int) -> None:
+        self._config["secure_remote_port"] = int(value)
+        self._save()
+    
+    @property
+    def secure_psk(self) -> Optional[str]:
+        return self._config.get("secure_psk")
+    
+    @secure_psk.setter
+    def secure_psk(self, value: Optional[str]) -> None:
+        self._config["secure_psk"] = value
+        self._save()
+    
+    @property
+    def secure_psk_file(self) -> str:
+        return str(self._config.get("secure_psk_file", "/etc/vortexl2/secure_psk"))
+    
+    @secure_psk_file.setter
+    def secure_psk_file(self, value: str) -> None:
+        self._config["secure_psk_file"] = str(value)
+        self._save()
+    
+    @property
+    def secure_role(self) -> str:
+        return str(self._config.get("secure_role", "server")).lower()
+    
+    @secure_role.setter
+    def secure_role(self, value: str) -> None:
+        self._config["secure_role"] = str(value).lower() if str(value).lower() in ("server", "client") else "server"
         self._save()
     
     def get_tunnel_ids(self) -> Dict[str, int]:
