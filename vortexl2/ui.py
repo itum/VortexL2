@@ -393,6 +393,7 @@ def prompt_secure_forward_settings(config: TunnelConfig) -> bool:
             console.print(f"[red]Failed to write PSK file: {e}[/]")
     else:
         console.print("[dim]Ensure the same PSK file (or content) exists on both servers.[/]")
+        console.print("[yellow]Prefer PSK file over storing secure_psk in tunnel YAML (plaintext in config).[/]")
     return True
 
 

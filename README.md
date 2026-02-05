@@ -250,14 +250,16 @@ You can encrypt traffic between the two servers for port forwards using a **TLS 
 2. Select the tunnel and choose **Enable secure forward**.
 3. Set **Role**: **server** (this host listens for TLS on port 443) or **client** (this host connects to the peer).
 4. Set **TLS listen port** / **TLS remote port** (default 443 on both sides).
-5. Set **PSK file path** (e.g. `/etc/vortexl2/secure_psk`). Use **Generate new random PSK** to create a secret; **copy the same file to the other server** (or put the same secret in `secure_psk` in the tunnel YAML).
+5. Set **PSK file path** (e.g. `/etc/vortexl2/secure_psk`). Prefer a **PSK file** on both servers (same path or copy the file). Use **Generate new random PSK** in the UI; avoid storing the secret in tunnel YAML (`secure_psk`) as plaintext.
 6. On the other server, repeat with the **opposite role** (one server, one client) and the **same PSK file or content**.
+7. In Secure mode, the **client** must connect to the server first; only then do connections to the server's forwarded ports work.
 
 ### Behaviour
 
 - **One TLS connection** carries all forwarded ports (TCP and UDP). Single handshake, lower overhead.
 - **Port 443** is the default so traffic looks like normal HTTPS to DPI.
 - **Backward compatible**: with secure forward off, existing TCP/UDP forwards work as before (socat).
+- **UDP in Secure mode**: Forwarding is one-way (client to remote); responses from the remote service are not returned over the tunnel. For protocols that need replies (e.g. DNS), use plain (socat) forwards or be aware of this limitation.
 
 ### Requirements
 

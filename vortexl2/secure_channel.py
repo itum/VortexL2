@@ -24,6 +24,9 @@ except ImportError:
 
 FRAME_HEADER_TCP = 6
 FRAME_HEADER_UDP = 6
+MAX_PAYLOAD_TCP = 2 * 1024 * 1024
+MAX_PAYLOAD_UDP = 65535
+MAX_BUF = 4 * 1024 * 1024
 
 def get_psk(config: Any) -> bytes:
     psk_str = getattr(config, "secure_psk", None)
@@ -32,6 +35,9 @@ def get_psk(config: Any) -> bytes:
     psk_file = getattr(config, "secure_psk_file", "/etc/vortexl2/secure_psk")
     path = os.path.expanduser(psk_file)
     if os.path.isfile(path):
+        mode = os.stat(path).st_mode
+        if (mode & 0o07) != 0:
+            logger.warning("PSK file %s is readable by others (mode %o). Prefer chmod 600.", path, mode & 0o777)
         with open(path, "rb") as f:
             return f.read().strip().split(b"\n")[0].strip()
     raise ValueError("Secure forward requires PSK: set secure_psk or create %s" % path)
@@ -100,12 +106,20 @@ class SecureChannelProtocol:
 
     def feed_with_udp(self, data: bytes) -> None:
         self._buf += data
+        if len(self._buf) > MAX_BUF:
+            logger.warning("Secure channel buffer exceeded %s bytes, dropping", MAX_BUF)
+            self._buf = b""
+            return
         while len(self._buf) >= FRAME_HEADER_TCP:
             sid = struct.unpack(">H", self._buf[:2])[0]
             if sid == 0:
                 if len(self._buf) < FRAME_HEADER_UDP:
                     break
                 port, plen = struct.unpack(">HH", self._buf[2:6])
+                if plen > MAX_PAYLOAD_UDP:
+                    logger.warning("UDP frame length %s exceeds max %s, dropping", plen, MAX_PAYLOAD_UDP)
+                    self._buf = self._buf[FRAME_HEADER_UDP:]
+                    continue
                 if len(self._buf) < FRAME_HEADER_UDP + plen:
                     break
                 payload = self._buf[FRAME_HEADER_UDP:FRAME_HEADER_UDP+plen]
@@ -113,6 +127,10 @@ class SecureChannelProtocol:
                 self.on_udp(0, port, payload)
             else:
                 length = struct.unpack(">I", self._buf[2:6])[0]
+                if length > MAX_PAYLOAD_TCP:
+                    logger.warning("TCP frame length %s exceeds max %s, dropping", length, MAX_PAYLOAD_TCP)
+                    self._buf = b""
+                    return
                 if len(self._buf) < FRAME_HEADER_TCP + length:
                     break
                 payload = self._buf[FRAME_HEADER_TCP:FRAME_HEADER_TCP+length]
@@ -149,9 +167,12 @@ async def run_secure_proxy(config: Any) -> None:
 
     def assign_sid(port, proto):
         nonlocal next_sid
-        s = next_sid
-        next_sid = (next_sid + 1) if next_sid < 0xFFFE else 1
-        return s
+        for _ in range(0xFFFE):
+            s = next_sid
+            next_sid = (next_sid + 1) if next_sid < 0xFFFE else 1
+            if s not in stream_to_writer:
+                return s
+        return next_sid
 
     def on_tcp_open(sid, port):
         async def run():
